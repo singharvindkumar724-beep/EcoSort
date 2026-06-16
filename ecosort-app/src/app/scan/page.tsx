@@ -254,13 +254,23 @@ export default function ScanPage() {
                   <p style={{ fontSize: "0.875rem", color: "var(--eco-text-muted)", marginBottom: "20px" }}>
                     EcoSort will automatically classify the waste
                   </p>
-                  <div style={{ display: "flex", gap: "10px", justifyContent: "center" }}>
-                    <span className="btn-eco" style={{ padding: "8px 16px", fontSize: "0.875rem", display: "flex", gap: "6px", alignItems: "center" }}>
-                      <Camera size={16} /> Open Camera
-                    </span>
-                    <span className="btn-ghost" style={{ padding: "8px 16px", fontSize: "0.875rem", display: "flex", gap: "6px", alignItems: "center" }}>
-                      <FolderOpen size={16} /> Browse
-                    </span>
+                  <div style={{ display: "flex", gap: "12px", justifyContent: "center", flexWrap: "wrap", width: "100%", padding: "0 10px" }}>
+                    <button 
+                      type="button"
+                      className="btn-eco" 
+                      style={{ padding: "12px 20px", fontSize: "0.95rem", display: "flex", gap: "8px", alignItems: "center", flex: "1 1 auto", justifyContent: "center", minWidth: "140px" }}
+                      onClick={(e) => { e.stopPropagation(); cameraInputRef.current?.click(); }}
+                    >
+                      <Camera size={18} /> Open Camera
+                    </button>
+                    <button 
+                      type="button"
+                      className="btn-ghost" 
+                      style={{ padding: "12px 20px", fontSize: "0.95rem", display: "flex", gap: "8px", alignItems: "center", flex: "1 1 auto", justifyContent: "center", minWidth: "140px" }}
+                      onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                    >
+                      <FolderOpen size={18} /> Browse
+                    </button>
                   </div>
                 </>
               )}
