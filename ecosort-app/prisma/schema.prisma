@@ -1,0 +1,189 @@
+// EcoSort Prisma Schema
+// PostgreSQL + pgvector via Supabase
+// Embedding dimension: 768 (IBM watsonx slate-125m-english-rtrvr)
+// IMPORTANT: Do NOT change vector(768) dimension after first migration.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  extensions = [pgvector(map: "vector", schema: "extensions")]
+}
+
+// ─────────────────────────────────────────────
+// LOCALITY
+// Represents a city/municipality with its own
+// waste management rules (e.g., Varanasi, UP)
+// ─────────────────────────────────────────────
+model Locality {
+  id          String      @id @default(cuid())
+  name        String      @unique // e.g., "Varanasi"
+  state       String      // e.g., "Uttar Pradesh"
+  country     String      @default("India")
+  timezone    String      @default("Asia/Kolkata")
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  users       User[]
+  wasteRules  WasteRule[]
+
+  @@map("localities")
+}
+
+// ─────────────────────────────────────────────
+// USER
+// Represents a device/session-linked identity.
+// No PII required for MVP; frictionless auth.
+// ─────────────────────────────────────────────
+model User {
+  id          String    @id @default(cuid())
+  deviceId    String    @unique // browser-generated UUID stored in localStorage
+  displayName String?   // optional display name
+  localityId  String
+  locality    Locality  @relation(fields: [localityId], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  points             UserPoints?
+  classificationEvents ClassificationEvent[]
+  disposalLogs       DisposalLog[]
+
+  @@index([deviceId])
+  @@index([localityId])
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────
+// USER POINTS
+// Gamification: points, streaks, level
+// ─────────────────────────────────────────────
+model UserPoints {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  totalPoints     Int      @default(0)
+  currentStreak   Int      @default(0) // consecutive days
+  longestStreak   Int      @default(0)
+  lastActivityAt  DateTime?
+  level           Int      @default(1)
+  updatedAt       DateTime @updatedAt
+
+  @@map("user_points")
+}
+
+// ─────────────────────────────────────────────
+// WASTE CATEGORY ENUM
+// Core waste categories per Indian municipal
+// guidelines (Varanasi: wet/dry focus for MVP)
+// ─────────────────────────────────────────────
+enum WasteCategory {
+  WET_ORGANIC    // food scraps, peels, garden waste
+  DRY_RECYCLABLE // paper, cardboard, clean plastics, metals, glass
+  HAZARDOUS      // batteries, e-waste, chemicals, medicines
+  SANITARY       // diapers, sanitary products (non-recyclable)
+  CONSTRUCTION   // debris, tiles, bricks
+  INERT          // non-recyclable, non-hazardous (styrofoam, ceramics)
+  E_WASTE        // electronic waste (phones, cables, appliances)
+  BIOMEDICAL     // medical waste (syringes, medicines, bandages)
+  BULKY          // large items (furniture, mattresses)
+  TEXTILE        // clothes, fabrics, shoes
+  METAL_SCRAP    // scrap metal, iron, aluminum cans, hardware
+  UNKNOWN        // could not determine
+
+  @@map("waste_category")
+}
+
+// ─────────────────────────────────────────────
+// WASTE RULE
+// RAG knowledge base entry. Each rule covers
+// one item or item class for a specific locality.
+// The `embedding` column uses pgvector for
+// cosine-similarity RAG retrieval.
+//
+// DIMENSION LOCK: vector(768) matches
+// ibm/slate-125m-english-rtrvr output dimension.
+// DO NOT change without a full re-migration
+// and re-embedding of all rules.
+// ─────────────────────────────────────────────
+model WasteRule {
+  id            String        @id @default(cuid())
+  localityId    String
+  locality      Locality      @relation(fields: [localityId], references: [id])
+  itemName      String        // e.g., "Plastic Water Bottle (PET)"
+  aliases       String[]      // alternate names for matching
+  category      WasteCategory
+  // Disposal instructions in plain language:
+  disposalInstructions String  @db.Text
+  // Tips/notes (e.g., "rinse before discarding"):
+  tips          String?       @db.Text
+  // Whether item is recyclable locally:
+  isRecyclable  Boolean       @default(false)
+  // Source reference for the rule:
+  source        String?       // e.g., "Varanasi Nagar Nigam 2023 Guidelines"
+  // pgvector embedding column (384-dim, DO NOT CHANGE):
+  // Stored as Unsupported until Prisma native pgvector lands.
+  embedding     Unsupported("vector(384)")?
+
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([localityId])
+  @@index([category])
+  @@map("waste_rules")
+}
+
+// ─────────────────────────────────────────────
+// CLASSIFICATION EVENT
+// Audit log for every AI image classification.
+// PRIVACY: Image bytes are NEVER stored here.
+// Only the AI's output (category + confidence)
+// and a hash of the input are logged.
+// ─────────────────────────────────────────────
+model ClassificationEvent {
+  id              String        @id @default(cuid())
+  userId          String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // AI output:
+  predictedLabel  String        // e.g., "Plastic Water Bottle"
+  predictedCategory WasteCategory
+  confidenceScore Float         // 0.0 – 1.0
+  // Whether the agent asked a clarifying question:
+  requiredClarification Boolean @default(false)
+  // SHA-256 hash of the image bytes (for dedup only, no reconstruction):
+  imageHash       String?
+  // Matched waste rule (if found via RAG):
+  matchedRuleId   String?
+  // Watsonx model used:
+  modelId         String        @default("ibm/granite-vision-3-2-2b")
+  createdAt       DateTime      @default(now())
+
+  @@index([userId])
+  @@index([predictedCategory])
+  @@map("classification_events")
+}
+
+// ─────────────────────────────────────────────
+// DISPOSAL LOG
+// Tracks user disposal actions for point
+// generation. Denormalizes itemLabel + category
+// so history stays accurate if rules change.
+// ─────────────────────────────────────────────
+model DisposalLog {
+  id            String        @id @default(cuid())
+  userId        String
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Denormalized snapshot (rules may change, history must not):
+  itemLabel     String        // e.g., "Plastic Water Bottle"
+  category      WasteCategory
+  pointsAwarded Int           @default(10)
+  // Source of the log entry:
+  source        String        @default("image_scan") // "image_scan" | "chat"
+  createdAt     DateTime      @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("disposal_logs")
+}
