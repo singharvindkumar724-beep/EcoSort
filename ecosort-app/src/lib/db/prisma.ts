@@ -38,7 +38,6 @@ function createPrismaClient(): PrismaClient {
   const adapter = new PrismaPg(pool);
 
   return new PrismaClient({
-    // @ts-expect-error — adapter support is in preview
     adapter,
     log:
       process.env.NODE_ENV === "development"
