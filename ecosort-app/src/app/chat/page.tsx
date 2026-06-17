@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Leaf, MessageSquare, User, Bot, ClipboardList, Recycle, Ban, Zap, ArrowRight, AlertTriangle } from "lucide-react";
+import { Leaf, MessageSquare, User, Bot, ClipboardList, Recycle, Ban, Zap, ArrowRight, AlertTriangle, ImagePlus, X } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -9,6 +9,7 @@ interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  imageUrl?: string;
   matchedRule?: {
     itemName: string;
     category: string;
@@ -42,8 +43,11 @@ export default function ChatPage() {
   ]);
   const [input, setInput]         = useState("");
   const [loading, setLoading]     = useState(false);
+  const [file, setFile]           = useState<File | null>(null);
+  const [preview, setPreview]     = useState<string | null>(null);
   const messagesEndRef             = useRef<HTMLDivElement>(null);
   const inputRef                   = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef               = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -51,17 +55,38 @@ export default function ChatPage() {
 
   // ── Send message ──────────────────────────────────────────────────────────
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) {
+      if (!f.type.startsWith("image/")) {
+        alert("Please upload an image file.");
+        return;
+      }
+      setFile(f);
+      const reader = new FileReader();
+      reader.onload = (e) => setPreview(e.target?.result as string);
+      reader.readAsDataURL(f);
+    }
+  };
+
   const send = async (text: string) => {
-    if (!text.trim() || loading) return;
+    if ((!text.trim() && !file) || loading) return;
+
+    const messageText = text.trim() || "How do I dispose of this?";
+    const currentFile = file;
+    const currentPreview = preview;
 
     const userMsg: Message = {
       id: crypto.randomUUID(),
       role: "user",
-      content: text.trim(),
+      content: messageText,
+      imageUrl: currentPreview || undefined,
     };
 
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
+    setFile(null);
+    setPreview(null);
     setLoading(true);
 
     // Build history (last 10 messages, excluding welcome)
@@ -77,13 +102,44 @@ export default function ChatPage() {
         localStorage.setItem("ecosort_device_id", deviceId);
       }
 
+      let classificationContext = undefined;
+
+      if (currentFile) {
+        const form = new FormData();
+        form.append("image", currentFile);
+        form.append("deviceId", deviceId);
+
+        const classRes = await fetch("/api/classify", { method: "POST", body: form });
+        const classJson = await classRes.json();
+
+        if (classJson.success && classJson.data) {
+          classificationContext = {
+            itemLabel: classJson.data.itemLabel,
+            category: classJson.data.category,
+            confidence: classJson.data.confidence,
+          };
+        } else {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: "assistant",
+              content: classJson.error || "Failed to analyze the uploaded image. Please try again.",
+            },
+          ]);
+          setLoading(false);
+          return;
+        }
+      }
+
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message: text.trim(),
+          message: messageText,
           deviceId,
           history,
+          classificationContext,
         }),
       });
 
@@ -246,6 +302,19 @@ export default function ChatPage() {
                     : "0 2px 12px rgba(0,0,0,0.06)",
               }}
             >
+              {msg.imageUrl && (
+                <img
+                  src={msg.imageUrl}
+                  alt="Uploaded image"
+                  style={{
+                    maxWidth: "100%",
+                    maxHeight: "200px",
+                    borderRadius: "12px",
+                    marginBottom: "8px",
+                    objectFit: "contain",
+                  }}
+                />
+              )}
               <div
                 dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
               />
@@ -386,6 +455,18 @@ export default function ChatPage() {
           paddingTop: "8px",
         }}
       >
+        {preview && (
+          <div style={{ position: "relative", display: "inline-block", marginBottom: "8px", marginLeft: "18px" }}>
+            <img src={preview} alt="Preview" style={{ height: "60px", borderRadius: "8px", border: "1px solid var(--eco-border)", objectFit: "cover" }} />
+            <button
+              onClick={() => { setFile(null); setPreview(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+              style={{ position: "absolute", top: "-6px", right: "-6px", background: "var(--eco-bg)", border: "1px solid var(--eco-border)", borderRadius: "50%", padding: "2px", cursor: "pointer", color: "var(--eco-text)", display: "flex", alignItems: "center", justifyContent: "center" }}
+              aria-label="Remove image"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
         <div
           className="glass"
           style={{
@@ -396,6 +477,31 @@ export default function ChatPage() {
             padding: "10px 12px 10px 18px",
           }}
         >
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={loading}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "var(--eco-text-muted)",
+              cursor: loading ? "not-allowed" : "pointer",
+              padding: "4px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              marginBottom: "2px",
+            }}
+            aria-label="Upload image"
+          >
+            <ImagePlus size={20} />
+          </button>
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            accept="image/*" 
+            style={{ display: "none" }} 
+            onChange={handleFileChange} 
+          />
           <textarea
             ref={inputRef}
             id="chat-input"
@@ -423,12 +529,12 @@ export default function ChatPage() {
           <button
             id="btn-send"
             onClick={() => send(input)}
-            disabled={!input.trim() || loading}
+            disabled={(!input.trim() && !file) || loading}
             className="btn-eco"
             style={{
               padding: "10px 18px",
               fontSize: "0.9rem",
-              opacity: !input.trim() || loading ? 0.5 : 1,
+              opacity: (!input.trim() && !file) || loading ? 0.5 : 1,
               flexShrink: 0,
             }}
             aria-label="Send message"
