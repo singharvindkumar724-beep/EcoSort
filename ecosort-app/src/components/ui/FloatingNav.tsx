@@ -138,6 +138,7 @@ export default function FloatingNav() {
                   {item.icon}
                 </span>
                 <span
+                  className="nav-label"
                   style={{
                     // Hide label on very small screens
                     display: "var(--label-display, inline)",
@@ -181,11 +182,14 @@ export default function FloatingNav() {
         </div>
       </nav>
 
-      {/* Responsive label hide for xs screens */}
+      {/* Responsive label hide for mobile screens */}
       <style>{`
-        @media (max-width: 420px) {
-          #floating-nav a span:last-child { display: none; }
-          #floating-nav a { padding: 8px !important; }
+        @media (max-width: 550px) {
+          .nav-label { display: none !important; }
+          #floating-nav a:not(#nav-logo) { padding: 8px !important; justify-content: center; }
+        }
+        @media (max-width: 360px) {
+          #nav-logo span { display: none !important; }
         }
       `}</style>
     </header>
