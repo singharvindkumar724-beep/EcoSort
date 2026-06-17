@@ -41,6 +41,24 @@ interface WatsonxGenerateResult {
   generated_token_count: number;
 }
 
+export interface WatsonxChatParams {
+  modelId: string;
+  messages: Array<{
+    role: "system" | "user" | "assistant";
+    content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+  }>;
+  parameters?: {
+    max_tokens?: number;
+    temperature?: number;
+    top_p?: number;
+  };
+}
+
+export interface WatsonxChatResult {
+  role: string;
+  content: string;
+}
+
 interface WatsonxEmbedParams {
   modelId: string;
   inputs: string[];
@@ -219,6 +237,49 @@ export async function generateText(
   }
 
   return result;
+}
+
+// ─── Chat Generation (Multimodal) ──────────────────────────────────────────────
+
+/**
+ * Generate a chat response using watsonx (supports images for vision models).
+ */
+export async function generateChat(
+  params: WatsonxChatParams
+): Promise<WatsonxChatResult> {
+  const projectId = process.env.WATSONX_PROJECT_ID!;
+  const maxTokens = parseInt(
+    process.env.WATSONX_MAX_TOKENS ?? "512",
+    10
+  );
+
+  interface ChatResponse {
+    choices: Array<{
+      message: {
+        role: string;
+        content: string;
+      };
+      finish_reason: string;
+    }>;
+  }
+
+  const response = await watsonxFetch<ChatResponse>("/ml/v1/text/chat", {
+    body: {
+      model_id: params.modelId,
+      project_id: projectId,
+      messages: params.messages,
+      max_tokens: params.parameters?.max_tokens ?? maxTokens,
+      temperature: params.parameters?.temperature ?? 0.1,
+      top_p: params.parameters?.top_p ?? 0.9,
+    },
+  });
+
+  const choice = response.choices?.[0];
+  if (!choice) {
+    throw new Error("watsonx chat returned no results");
+  }
+
+  return choice.message;
 }
 
 // ─── Embeddings ───────────────────────────────────────────────────────────────

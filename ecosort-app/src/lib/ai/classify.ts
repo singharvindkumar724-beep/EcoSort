@@ -15,7 +15,7 @@
  */
 
 import crypto from "node:crypto";
-import { generateText } from "./watsonxClient";
+import { generateChat } from "./watsonxClient";
 import { WasteCategory } from "@prisma/client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -89,12 +89,10 @@ const CATEGORY_MAP: Record<string, WasteCategory> = {
 // ─── Classification Prompt ────────────────────────────────────────────────────
 
 /**
- * Builds the classification prompt for Granite Vision.
- * Uses a structured output format for reliable JSON parsing.
+ * Gets the system instructions for the classification prompt.
  */
-function buildClassificationPrompt(): string {
-  return `<|system|>
-You are EcoSort, an expert waste classification assistant trained on Indian municipal solid waste management guidelines.
+function getSystemInstructions(): string {
+  return `You are EcoSort, an expert waste classification assistant trained on Indian municipal solid waste management guidelines.
 
 Your task is to analyze the image and classify the waste item into exactly one of these categories:
 - WET_ORGANIC: Food scraps, vegetable peels, cooked food, garden waste, flowers
@@ -118,11 +116,7 @@ Respond ONLY with a valid JSON object matching this exact schema:
   "reasoning": "string (brief 1-sentence explanation)"
 }
 
-Do not include any text outside the JSON object.
-<|user|>
-Classify the waste item in this image:
-[IMAGE]
-<|assistant|>`;
+Do not include any text outside the JSON object.`;
 }
 
 // ─── JSON Parser ──────────────────────────────────────────────────────────────
@@ -191,25 +185,36 @@ export async function classifyImage(
   const base64Image = buffer.toString("base64");
   const dataUri = `data:${mimeType};base64,${base64Image}`;
 
-  // Step 3: Build the prompt with image
-  const prompt = buildClassificationPrompt().replace("[IMAGE]", dataUri);
+  // Step 3: Build the messages payload
+  const messages = [
+    {
+      role: "system" as const,
+      content: getSystemInstructions(),
+    },
+    {
+      role: "user" as const,
+      content: [
+        { type: "text" as const, text: "Classify the waste item in this image:" },
+        { type: "image_url" as const, image_url: { url: dataUri } },
+      ],
+    },
+  ];
 
   let rawResponse = "";
   let parsed: RawClassificationOutput | null = null;
 
   try {
-    // Step 4: Call watsonx Granite Vision
-    const result = await generateText({
+    // Step 4: Call watsonx chat for vision
+    const result = await generateChat({
       modelId: VISION_MODEL_ID,
-      input: prompt,
+      messages,
       parameters: {
-        max_new_tokens: 200,
+        max_tokens: 200,
         temperature: 0.1, // Low temperature for deterministic classification
-        stop_sequences: ["}"],
       },
     });
 
-    rawResponse = result.generated_text + "}"; // Restore stop sequence
+    rawResponse = result.content;
     parsed = parseClassificationResponse(rawResponse);
   } catch (error) {
     // If the vision model call fails, return UNKNOWN with low confidence
