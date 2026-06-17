@@ -31,7 +31,7 @@ export function BentoGrid({
 }: BentoGridProps) {
   return (
     <div
-      className={className}
+      className={`bento-root-${columns} ${className}`}
       style={{
         display: "grid",
         gridTemplateColumns: `repeat(${columns}, 1fr)`,
